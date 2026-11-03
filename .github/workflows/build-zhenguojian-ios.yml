@@ -50,6 +50,18 @@ jobs:
         run: |
           flutter pub get
           git diff -- pubspec.lock
+      - name: Preserve required Payload directory when packaging IPA
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          script = Path('scripts/build_ios.py')
+          original = "run(['ditto', '-c', '-k', '--sequesterRsrc', str(payload), str(ipa)])"
+          replacement = "run(['ditto', '-c', '-k', '--sequesterRsrc', '--keepParent', str(payload), str(ipa)])"
+          code = script.read_text()
+          if code.count(original) != 1:
+              raise SystemExit('Unexpected upstream IPA packaging code; manual review required.')
+          script.write_text(code.replace(original, replacement))
+          PY
       - name: Build all-sources edition
         run: python3 scripts/build_ios.py --all-sources
       - name: Verify IPA structure and identity
