@@ -1,0 +1,84 @@
+name: Build zhenguojian iOS IPA
+
+on:
+  push:
+    branches: [codex/zhenguojian-ios]
+    paths: [.github/workflows/build-zhenguojian-ios.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ios:
+    runs-on: macos-latest
+    timeout-minutes: 60
+    env:
+      GOPROXY: https://proxy.golang.org,direct
+      GOSUMDB: sum.golang.org
+      COCOAPODS_DISABLE_STATS: 'true'
+    defaults:
+      run:
+        working-directory: source
+    steps:
+      - name: Check out version 0.2.64+71
+        uses: actions/checkout@v4
+        with:
+          repository: zhoufuweigg/guoapp
+          ref: 0e60928514c31a96ade9b31866948f15da5ca2a6
+          path: source
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: source/native/go.mod
+          cache-dependency-path: source/native/go.sum
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.4'
+          channel: stable
+          cache: true
+      - name: Check build tools
+        run: |
+          xcodebuild -version
+          flutter --version
+          go version
+          pod --version
+      - name: Resolve declared dependencies missing from upstream lockfile
+        run: |
+          flutter pub get
+          git diff -- pubspec.lock
+      - name: Build all-sources edition
+        run: python3 scripts/build_ios.py --all-sources
+      - name: Verify IPA structure and identity
+        run: |
+          python3 - <<'PY'
+          import hashlib
+          import plistlib
+          import zipfile
+          from pathlib import Path
+          ipa = Path('dist/ios/zhenguojian-0.2.64+71-ios-unsigned.ipa')
+          with zipfile.ZipFile(ipa) as archive:
+              bad = archive.testzip()
+              if bad is not None:
+                  raise SystemExit('Corrupt ZIP member: ' + bad)
+              info = plistlib.loads(archive.read('Payload/Runner.app/Info.plist'))
+              assert info['CFBundleDisplayName'] == '真果鉴', info
+              assert info['CFBundleShortVersionString'] == '0.2.64', info
+              assert str(info['CFBundleVersion']) == '71', info
+              assert archive.getinfo('Payload/Runner.app/Runner').file_size > 0
+          print('Verified:', ipa.name)
+          print('SHA256:', hashlib.file_digest(ipa.open('rb'), 'sha256').hexdigest())
+          PY
+      - name: Upload unsigned IPA and checksum
+        uses: actions/upload-artifact@v4
+        with:
+          name: zhenguojian-0.2.64-71-ios-unsigned
+          path: |
+            source/dist/ios/zhenguojian-0.2.64+71-ios-unsigned.ipa
+            source/dist/ios/SHA256SUMS.txt
+            source/pubspec.lock
+          if-no-files-found: error
+          retention-days: 7
